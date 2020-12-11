@@ -167,12 +167,6 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 	
 	if ( args.ArgC() > 0 )
 	{
-		if ( args[0] == "y" )
-		{
-			peepee(EHandle(plr), 1.0f, 4, true);
-			return true;
-		}
-		
 		if ( args[0] == ".pp" )
 		{
 			if (args.ArgC() > 1) {
