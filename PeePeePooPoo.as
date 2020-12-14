@@ -74,9 +74,6 @@ PlayerState@ getPlayerState(CBasePlayer@ plr)
 	return cast<PlayerState@>( g_player_states[steamId] );
 }
 
-int bone = 35;
-//int bone = 36;
-
 void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
 	
@@ -96,7 +93,7 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 	pos = plr.pev.origin;
 	
 	if (state.bone != -1) {
-		plr.GetBonePosition(bone, pos, angles);
+		plr.GetBonePosition(state.bone, pos, angles);
 	} else {
 		float offset = state.offset;
 		if (plr.pev.flags & FL_DUCKING != 0) {
