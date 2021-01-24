@@ -2,6 +2,11 @@ dictionary g_player_states;
 
 CCVar@ cvar_pp_cooldown;
 
+string pee_sprite = "sprites/pee.spr";
+string coom_sprite = "sprites/coom.spr";
+
+array<string> coom_sounds = {"pp/coom.wav", "pp/coom2.wav", "pp/coom3.wav"};
+
 class PlayerState {
 	bool autoPee = false;
 	bool male = true;
@@ -26,7 +31,13 @@ void PluginInit()
 
 void MapInit()
 {
-	g_Game.PrecacheModel("sprites/pee.spr");
+	g_Game.PrecacheModel(pee_sprite);
+	g_Game.PrecacheModel(coom_sprite);
+	
+	for (uint i = 0; i < coom_sounds.size(); i++) {
+		g_SoundSystem.PrecacheSound(coom_sounds[i]);
+		g_Game.PrecacheGeneric("sound/" + coom_sounds[i]);
+	}
 }
 
 void MapActivate() {	
@@ -128,7 +139,7 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 	edict_t@ dest = isTest ? @plr.edict() : null;
 	
 	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
-		te_firefield(plr.pev.origin, 16, "sprites/pee.spr", count, 8, 255, msgType, dest);
+		te_firefield(plr.pev.origin, 16, pee_sprite, count, 8, 255, msgType, dest);
 	} else {
 		Vector peedir = state.male ? dir*50 + (dir*150*speed) : Vector(0,0,0);
 		
@@ -146,6 +157,77 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 	}
 	
 	g_Scheduler.SetTimeout("peepee", delay, h_plr, strength - 0.01f, squirts_left, isTest);
+}
+
+void delay_decal(Vector pos, EHandle h_hitEnt) {
+	te_decal(pos, h_hitEnt, "{mommablob");
+}
+
+void coom(EHandle h_plr, float strength, int squirts_left) {
+	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
+	
+	if (plr is null or strength <= 0 or !plr.IsAlive()) {
+		return;
+	}
+	
+	PlayerState@ state = getPlayerState(plr);
+	
+	Vector pos, angles;	
+	pos = plr.pev.origin;
+	
+	if (state.bone != -1) {
+		plr.GetBonePosition(state.bone, pos, angles);
+	} else {
+		
+		float offset = state.offset;
+		if (plr.pev.flags & FL_DUCKING != 0) {
+			offset *= 0.5f;
+		}
+		pos.z += offset;
+	}
+
+	angles = plr.pev.v_angle;
+	Math.MakeVectors(angles);
+	Vector lookdir = g_Engine.v_forward;
+
+	angles.x -= 15;
+	
+	Math.MakeVectors(angles);
+	Vector coomdir = g_Engine.v_forward;
+	
+	
+	
+	float speed = strength;
+	int count = strength > 0.5f ? 2 : 1;
+	
+	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
+		te_firefield(plr.pev.origin, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
+	} else {
+		Vector peedir = state.male ? coomdir : Vector(0,0,0);
+		
+		int life = 255;
+		int flags = 4;
+		te_bloodstream(pos, coomdir, 5, int(speed*200));
+		
+		if (strength == 1.0f) {
+			float coomDist = strength*256;
+			Vector headPos = plr.pev.origin + plr.pev.view_ofs;
+			TraceResult tr;
+			g_Utility.TraceLine(headPos, headPos + lookdir*coomDist, ignore_monsters, plr.edict(), tr );
+			
+			if (tr.flFraction < 1.0f) {
+				float impactTime = (tr.vecEndPos - pos).Length() / coomDist;
+				g_Scheduler.SetTimeout("delay_decal", impactTime, tr.vecEndPos, EHandle(g_EntityFuncs.Instance(tr.pHit)));
+			}
+		}
+		
+	}
+	
+	float delay = 1.0f;
+	if (--squirts_left > 0) {
+		g_Scheduler.SetTimeout("coom", delay, h_plr, strength * 0.6f, squirts_left);
+	}
+	
 }
 
 string format_float(float f)
@@ -225,6 +307,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '-----------------------------Pee Pee Poo Poo Commands-----------------------------\n\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pee" to pee.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".coom" to coom.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp auto" to toggle automatic peeing.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp [m/f]" to change pee mode.\n');
 			
@@ -254,6 +337,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 		
 			if (!isConsoleCommand) {
 				g_PlayerFuncs.SayText(plr, 'Say ".pee" to pee.\n');
+				g_PlayerFuncs.SayText(plr, 'Say ".coom" to coom.\n');
 				g_PlayerFuncs.SayText(plr, 'Type ".pp" in console for more commands/info\n');
 			}
 			return true;
@@ -269,6 +353,25 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
 			peepee(EHandle(plr), 1.0f, 4, false);
+			return true;
+		}
+		
+		if ( args[0] == ".coom" )
+		{
+			float delta = g_Engine.time - state.lastPee;
+			if (delta < cvar_pp_cooldown.GetInt()) {
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCENTER, "Wait " + int((cvar_pp_cooldown.GetInt() - delta) + 0.99f) + " seconds\n");
+				return true;
+			}
+			state.nextPee = getNextAutoPee();
+			state.lastPee = g_Engine.time;
+			coom(EHandle(plr), 1.0f, 3);
+			
+			string snd = coom_sounds[Math.RandomLong(0, coom_sounds.size()-1)];
+			int pit = Math.RandomLong(95, 105);
+			float vol = 1.0f;
+			g_SoundSystem.PlaySound(plr.edict(), CHAN_VOICE, snd, vol, 0.8f, 0, pit, 0, true, plr.pev.origin);
+			
 			return true;
 		}
 	}
@@ -291,6 +394,7 @@ HookReturnCode ClientSay( SayParameters@ pParams )
 
 CClientCommand _pp("pp", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _pee("pee", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _coom("coom", "Pee pee poo poo commands", @consoleCmd );
 
 void consoleCmd( const CCommand@ args )
 {
@@ -416,5 +520,18 @@ void te_firefield(Vector pos, uint16 radius=128,
 	m.WriteByte(count);
 	m.WriteByte(flags);
 	m.WriteByte(life);
+	m.End();
+}
+
+void te_decal(Vector pos, CBaseEntity@ brushEnt=null, string decal="{handi",
+	NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null)
+{
+	NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);
+	m.WriteByte(TE_DECAL);
+	m.WriteCoord(pos.x);
+	m.WriteCoord(pos.y);
+	m.WriteCoord(pos.z);
+	m.WriteByte(g_EngineFuncs.DecalIndex(decal));
+	m.WriteShort(brushEnt is null ? 0 : brushEnt.entindex());
 	m.End();
 }
