@@ -230,6 +230,91 @@ void coom(EHandle h_plr, float strength, int squirts_left) {
 	
 }
 
+void lactate(EHandle h_plr, float strength, int squirts_left) {
+	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
+	
+	if (plr is null or strength <= 0 or !plr.IsAlive()) {
+		return;
+	}
+	
+	PlayerState@ state = getPlayerState(plr);
+	
+	Vector pos, angles;	
+	pos = plr.pev.origin;
+	
+	if (state.bone != -1) {
+		plr.GetBonePosition(state.bone, pos, angles);
+	} else {
+		
+		float offset = state.offset;
+		if (plr.pev.flags & FL_DUCKING != 0) {
+			offset *= 0.5f;
+		}
+		pos.z += offset;
+	}
+
+	angles = plr.pev.v_angle;
+	angles.x *= 0.5f;
+	Math.MakeVectors(angles);
+	Vector lookdir = g_Engine.v_forward;
+	
+	pos.z += 8;
+	pos = pos + lookdir*8;
+	Vector latDir = g_Engine.v_right;
+	float nipSpacing = 4;
+	
+	Vector angles1 = angles;
+	angles1.x += Math.RandomFloat(0, -40);
+	angles1.y += Math.RandomFloat(0, -40);
+	Math.MakeVectors(angles1);
+	Vector dir1 = g_Engine.v_forward;
+	
+	Vector angles2 = angles;
+	angles2.x += Math.RandomFloat(0, -40);
+	angles2.z += Math.RandomFloat(0, 40);
+	Math.MakeVectors(angles2);
+	Vector dir2 = g_Engine.v_forward;
+	
+	float speed = strength;
+	int count = strength > 0.5f ? 2 : 1;
+	
+	Vector pos1 = pos + latDir*nipSpacing;
+	Vector pos2 = pos - latDir*nipSpacing;
+	
+	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
+		te_firefield(pos1, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
+		te_firefield(pos2, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
+	} else {
+		
+		te_bloodstream(pos1, dir1, 5, int(speed*200));
+		te_bloodstream(pos2, dir2, 5, int(speed*200));
+		
+		te_bloodsprite(pos1, "sprites/bloodspray.spr", "sprites/blood.spr", 10, 3);
+		te_bloodsprite(pos2, "sprites/bloodspray.spr", "sprites/blood.spr", 10, 3);
+	}
+	
+	float delay = 1.0f;
+	if (--squirts_left > 0) {
+		g_Scheduler.SetTimeout("lactate", delay, h_plr, strength * 0.6f, squirts_left);
+	}
+}
+
+void te_bloodsprite(Vector pos, string sprite1="sprites/bloodspray.spr",
+	string sprite2="sprites/blood.spr", uint8 color=70, uint8 scale=3,
+	NetworkMessageDest msgType=MSG_BROADCAST, edict_t@ dest=null)
+{
+	NetworkMessage m(msgType, NetworkMessages::SVC_TEMPENTITY, dest);
+	m.WriteByte(TE_BLOODSPRITE);
+	m.WriteCoord(pos.x);
+	m.WriteCoord(pos.y);
+	m.WriteCoord(pos.z);
+	m.WriteShort(g_EngineFuncs.ModelIndex(sprite1));
+	m.WriteShort(g_EngineFuncs.ModelIndex(sprite2));
+	m.WriteByte(color);
+	m.WriteByte(scale);
+	m.End();
+}
+
 string format_float(float f)
 {
 	uint decimal = uint(((f - int(f)) * 10)) % 10;
@@ -308,6 +393,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, '-----------------------------Pee Pee Poo Poo Commands-----------------------------\n\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pee" to pee.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".coom" to coom.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".milk" to lactate.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp auto" to toggle automatic peeing.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp [m/f]" to change pee mode.\n');
 			
@@ -338,6 +424,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			if (!isConsoleCommand) {
 				g_PlayerFuncs.SayText(plr, 'Say ".pee" to pee.\n');
 				g_PlayerFuncs.SayText(plr, 'Say ".coom" to coom.\n');
+				g_PlayerFuncs.SayText(plr, 'Say ".milk" to lactate.\n');
 				g_PlayerFuncs.SayText(plr, 'Type ".pp" in console for more commands/info\n');
 			}
 			return true;
@@ -374,6 +461,19 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			
 			return true;
 		}
+		
+		if ( args[0] == ".lactate" || args[0] == ".milk" )
+		{
+			float delta = g_Engine.time - state.lastPee;
+			if (delta < cvar_pp_cooldown.GetInt()) {
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCENTER, "Wait " + int((cvar_pp_cooldown.GetInt() - delta) + 0.99f) + " seconds\n");
+				return true;
+			}
+			state.nextPee = getNextAutoPee();
+			state.lastPee = g_Engine.time;
+			lactate(EHandle(plr), 1.0f, 2);
+			return true;
+		}
 	}
 	return false;
 }
@@ -395,6 +495,7 @@ HookReturnCode ClientSay( SayParameters@ pParams )
 CClientCommand _pp("pp", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _pee("pee", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _coom("coom", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _lactate("lactate", "Pee pee poo poo commands", @consoleCmd );
 
 void consoleCmd( const CCommand@ args )
 {
