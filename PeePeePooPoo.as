@@ -452,12 +452,15 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			}
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
+			
 			coom(EHandle(plr), 1.0f, 3);
 			
-			string snd = coom_sounds[Math.RandomLong(0, coom_sounds.size()-1)];
-			int pit = Math.RandomLong(95, 105);
-			float vol = 1.0f;
-			g_SoundSystem.PlaySound(plr.edict(), CHAN_VOICE, snd, vol, 0.8f, 0, pit, 0, true, plr.pev.origin);
+			if (plr.IsAlive()) {
+				string snd = coom_sounds[Math.RandomLong(0, coom_sounds.size()-1)];
+				int pit = Math.RandomLong(95, 105);
+				float vol = 0.8f;
+				g_SoundSystem.PlaySound(plr.edict(), CHAN_VOICE, snd, vol, 0.8f, 0, pit, 0, true, plr.pev.origin);
+			}
 			
 			return true;
 		}
