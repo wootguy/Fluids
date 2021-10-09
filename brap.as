@@ -26,9 +26,8 @@ const float SNIFF_DISTANCE = 256;
 const float BRAP_SPR_SCALE = 0.2f; // sprite scale at maximum size
 const float INHALE_DIST = 96.0f; // braps get smaller within this range
 const float KILL_DIST = 8.0f; // braps are killed within this range
-const float BRAP_LIFE = 10.0f; // braps live for this long unless interacted with
+const float BRAP_LIFE = 20.0f; // braps live for this long unless interacted with
 const float BRAP_RENDER_AMT = 24.0f;
-bool precached_yet = false;
 
 void te_bubbles(Vector mins, Vector maxs, float height=256.0f, 
 	string sprite="sprites/bubble.spr", uint8 count=64, float speed=16.0f,
@@ -119,9 +118,36 @@ Vector spreadDir(Vector dir, float degrees)
 	return vecAiming;
 }
 
+CBaseEntity@ getTootEnt(CBasePlayer@ plr) {
+	if (plr.IsAlive() || plr.pev.effects & EF_NODRAW == 0) {
+		return plr;
+	}
+	
+	if (plr.GetObserver().IsObserver() && plr.GetObserver().HasCorpse()) {
+		CBaseEntity@ ent = null;
+		do {
+			@ent = g_EntityFuncs.FindEntityByClassname(ent, "deadplayer"); 
+			if (ent !is null) {
+				CustomKeyvalues@ pCustom = ent.GetCustomKeyvalues();
+				CustomKeyvalue ownerKey( pCustom.GetKeyvalue( "$i_hipoly_owner" ) );
+				
+				if (ownerKey.Exists() && ownerKey.GetInteger() == plr.entindex()) {
+					return ent;
+				}
+			}
+		} while (ent !is null);
+	}
+	
+	return null;
+}
+
+bool canTootEffect(CBasePlayer@ plr) {
+	return plr.IsAlive() || (plr.pev.effects & EF_NODRAW == 0) || (plr.GetObserver().IsObserver() && plr.GetObserver().HasCorpse());
+}
+
 void bubble_toot(EHandle h_plr, int power) {
-	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
-	if (plr is null or !plr.IsConnected()) {
+	CBaseEntity@ plr = h_plr;
+	if (plr is null) {
 		return;
 	}
 	
@@ -140,11 +166,8 @@ void bubble_toot(EHandle h_plr, int power) {
 }
 
 void cloud_toot(EHandle h_plr, float spread, float baseSpeed) {
-	if (!precached_yet) {
-		return;
-	}
-	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
-	if (plr is null or !plr.IsConnected()) {
+	CBaseEntity@ plr = h_plr;
+	if (plr is null) {
 		return;
 	}
 	
@@ -158,8 +181,14 @@ void cloud_toot(EHandle h_plr, float spread, float baseSpeed) {
 	
 	if (!plr.IsAlive()) {
 		buttPos.z -= 35;
-		float c = Math.RandomFloat(0, Math.PI*2); // random point on circle
-		dir = Vector(cos(c), sin(c), 1)*speed;
+		float u = Math.RandomFloat(0, 1);
+		float v = Math.RandomFloat(0, 1);
+		float theta = 2 * Math.PI * u;
+		float phi = acos(2 * v - 1);
+		float x = sin(phi) * cos(theta);
+		float y = sin(phi) * sin(theta);
+		float z = abs(cos(phi));
+		dir = Vector(x, y, z)*speed;
 	}
 	
 	dictionary keys;
@@ -187,8 +216,8 @@ void cloud_toot(EHandle h_plr, float spread, float baseSpeed) {
 }
 
 void shit(EHandle h_plr, int scale) {
-	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
-	if (plr is null or !plr.IsConnected()) {
+	CBaseEntity@ plr = h_plr;
+	if (plr is null) {
 		return;
 	}
 	
@@ -203,40 +232,42 @@ void shit(EHandle h_plr, int scale) {
 
 void do_brap(CBasePlayer@ plr, string arg, float pitch) {
 	
-	if (!plr.IsAlive() && plr.pev.effects & EF_NODRAW != 0) {
+	if (!canTootEffect(plr)) {
 		return;
 	}
 	
 	float speed = (100.0f/pitch);
 	
-	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {		
+	CBaseEntity@ tootEnt = getTootEnt(plr);
+	
+	if (tootEnt.pev.waterlevel >= WATERLEVEL_WAIST) {		
 		if (arg == "brap") {
-			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 16, EHandle(plr), 4);
-			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(plr), 8);
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 16, EHandle(tootEnt), 4);
+			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 8);
 		} else if (arg == "braprape") {
-			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 15, EHandle(plr), 4);
-			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(plr), 32);
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 15, EHandle(tootEnt), 4);
+			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 32);
 		} else if (arg == "toot") {
-			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(plr), 12);
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(tootEnt), 12);
 		} else if (arg == "tooot") {
-			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(plr), 40);
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(tootEnt), 40);
 		}
 	} else {
 		if (arg == "brap") {
-			g_Scheduler.SetInterval("cloud_toot", 0.1f*speed, 8, EHandle(plr), 120.0f, 100.0f);
-			g_Scheduler.SetInterval("shit", 0.05f*speed, 20, EHandle(plr), 8);
+			g_Scheduler.SetInterval("cloud_toot", 0.1f*speed, 8, EHandle(tootEnt), 120.0f, 100.0f);
+			g_Scheduler.SetInterval("shit", 0.05f*speed, 20, EHandle(tootEnt), 8);
 		} else if (arg == "braprape") {
-			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 15, EHandle(plr), 360.0f, 100.0f);
-			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(plr), 32);
+			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 15, EHandle(tootEnt), 360.0f, 100.0f);
+			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 32);
 		} else if (arg == "toot") {
-			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(plr), 0, 100.0f);
+			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 0, 100.0f);
 		} else if (arg == "tooot") {
 			for (uint i = 0; i < 10; i++) {
-				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(plr), 120.0f, 100.0f);
+				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 120.0f, 100.0f);
 			}
 		} else if (arg == "tootrape") {
 			for (uint i = 0; i < 40; i++) {
-				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(plr), 360.0f, 600.0f);
+				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 360.0f, 600.0f);
 			}
 		}
 	}
@@ -265,7 +296,6 @@ void brap_precache() {
 	g_Game.PrecacheModel(cycler_model);
 	g_sniffers.resize(0);
 	g_sniffers.resize(g_Engine.maxClients+1);
-	precached_yet = true;
 }
 
 void brap_think() {
