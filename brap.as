@@ -24,10 +24,11 @@ array<string> brap_sprites = {
 const string cycler_model = "models/scmod/null.mdl";
 const float SNIFF_DISTANCE = 256;
 const float BRAP_SPR_SCALE = 0.2f; // sprite scale at maximum size
-const float INHALE_DIST = 96.0f; // braps get smaller within this range
+const float INHALE_DIST = 96.0f; // distance that sniffing affects braps
 const float KILL_DIST = 8.0f; // braps are killed within this range
-const float BRAP_LIFE = 20.0f; // braps live for this long unless interacted with
+const float BRAP_LIFE = 20.0f; // braps live for this long before being deleted
 const float BRAP_RENDER_AMT = 24.0f;
+const float BRAP_SPREAD_DIST = 16.0f; // braps will push each other away within this dist
 
 void te_bubbles(Vector mins, Vector maxs, float height=256.0f, 
 	string sprite="sprites/bubble.spr", uint8 count=64, float speed=16.0f,
@@ -165,13 +166,13 @@ void bubble_toot(EHandle h_plr, int power) {
 	}
 }
 
-void cloud_toot(EHandle h_plr, float spread, float baseSpeed) {
+void cloud_toot(EHandle h_plr, float spread, float baseSpeed, float speedMultMax) {
 	CBaseEntity@ plr = h_plr;
 	if (plr is null) {
 		return;
 	}
 	
-	float speed = baseSpeed + Math.RandomFloat(0.8f, 1.2f);
+	float speed = baseSpeed * Math.RandomFloat(0.8f, speedMultMax);
 	Vector buttPos = plr.pev.origin;
 	Vector angles = plr.pev.v_angle;
 	angles.x = 0;
@@ -245,29 +246,31 @@ void do_brap(CBasePlayer@ plr, string arg, float pitch) {
 			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 16, EHandle(tootEnt), 4);
 			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 8);
 		} else if (arg == "braprape") {
-			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 15, EHandle(tootEnt), 4);
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 16, EHandle(tootEnt), 16);
 			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 32);
 		} else if (arg == "toot") {
 			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(tootEnt), 12);
 		} else if (arg == "tooot") {
 			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 1, EHandle(tootEnt), 40);
+		} else if (arg == "tootrape") {
+			g_Scheduler.SetInterval("bubble_toot", 0.05f*speed, 2, EHandle(tootEnt), 180);
 		}
 	} else {
 		if (arg == "brap") {
-			g_Scheduler.SetInterval("cloud_toot", 0.1f*speed, 8, EHandle(tootEnt), 120.0f, 100.0f);
+			g_Scheduler.SetInterval("cloud_toot", 0.1f*speed, 8, EHandle(tootEnt), 90.0f, 100.0f, 1.5f);
 			g_Scheduler.SetInterval("shit", 0.05f*speed, 20, EHandle(tootEnt), 8);
 		} else if (arg == "braprape") {
-			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 15, EHandle(tootEnt), 360.0f, 100.0f);
+			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 15, EHandle(tootEnt), 360.0f, 150.0f, 2.0f);
 			g_Scheduler.SetInterval("shit", 0.05f*speed, 15, EHandle(tootEnt), 32);
 		} else if (arg == "toot") {
-			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 0, 100.0f);
+			g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 0, 100.0f, 1.0f);
 		} else if (arg == "tooot") {
 			for (uint i = 0; i < 10; i++) {
-				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 120.0f, 100.0f);
+				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 20.0f, 100.0f, 3.0f);
 			}
 		} else if (arg == "tootrape") {
 			for (uint i = 0; i < 40; i++) {
-				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 360.0f, 600.0f);
+				g_Scheduler.SetInterval("cloud_toot", 0.05f*speed, 1, EHandle(tootEnt), 20.0f, 200.0f, 8.0f);
 			}
 		}
 	}
@@ -301,16 +304,16 @@ void brap_precache() {
 void brap_think() {
 	array<Brap> new_braps;
 	
-	array<CBasePlayer@> sniffSources;
+	array<CBaseEntity@> sniffSources;
 	for (uint i = 1; i < g_sniffers.size(); i++) {
 		if (g_sniffers[i] > g_Engine.time) {
 			CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
 			
 			if (plr !is null) {
-				if (!plr.IsAlive() && plr.pev.effects & EF_NODRAW != 0) {
-					continue;
+				CBaseEntity@ tootEnt = getTootEnt(plr);
+				if (tootEnt !is null) {
+					sniffSources.insertLast(tootEnt);
 				}
-				sniffSources.insertLast(plr);
 			}
 		}
 	}
@@ -327,7 +330,7 @@ void brap_think() {
 		
 		if (sniffSources.size() > 0) {
 			for (uint k = 0; k < sniffSources.size(); k++) {
-				CBasePlayer@ sniffer = sniffSources[k];
+				CBaseEntity@ sniffer = sniffSources[k];
 				bool isDucking = sniffer.pev.flags & FL_DUCKING != 0;
 				Vector sniffTarget = sniffer.pev.origin + Vector(0,0, isDucking ? 10 : 26);
 				
@@ -364,7 +367,19 @@ void brap_think() {
 				}
 			}
 		} else {
+			CBaseEntity@ otherBrap = null;
+			do {
+				@otherBrap = g_EntityFuncs.FindEntityInSphere(otherBrap, mdl.pev.origin, BRAP_SPREAD_DIST, "cycler", "classname"); 
+				if (otherBrap !is null and otherBrap.entindex() != mdl.entindex()) {
+					mdl.pev.velocity = mdl.pev.velocity + (mdl.pev.origin - otherBrap.pev.origin)*0.1f;
+				}
+			} while (otherBrap !is null);
+			
 			mdl.pev.velocity = mdl.pev.velocity * 0.9f;
+			
+			if (mdl.pev.velocity.Length() < 1) {
+				mdl.pev.velocity = Vector(0,0,0);
+			}
 			
 			if (brap.pev.scale < BRAP_SPR_SCALE) {
 				brap.pev.scale *= 1.2f;
@@ -383,8 +398,6 @@ void brap_think() {
 		
 		new_braps.insertLast(g_braps[i]);
 	}
-	
-	
 	
 	g_braps = new_braps;
 }
