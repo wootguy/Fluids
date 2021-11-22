@@ -189,7 +189,7 @@ void cloud_toot(EHandle h_plr, float spread, float baseSpeed, float speedMultMax
 		float x = sin(phi) * cos(theta);
 		float y = sin(phi) * sin(theta);
 		float z = abs(cos(phi));
-		dir = Vector(x, y, z)*speed;
+		dir = Vector(x, y, z)*speed*0.3f;
 	}
 	
 	dictionary keys;
