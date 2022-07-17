@@ -111,8 +111,6 @@ void PluginInit()
 	@cvar_bleed_cooldown = CCVar("bloodcooldown", 1, "bleed cooldown", ConCommandFlag::AdminOnly);
 	
 	g_Scheduler.SetInterval("auto_pee", 1.0f, -1);
-	
-	g_CustomEntityFuncs.RegisterCustomEntity( "BloodChunk", "BloodChunk" );
 }
 
 void MapInit()
@@ -138,6 +136,8 @@ void MapActivate() {
 		state.lastPee = -999;
 		state.lastBleed = -999;
 	}
+	
+	g_CustomEntityFuncs.RegisterCustomEntity( "BloodChunk", "BloodChunk" );
 }
 
 void bleed(CBasePlayer@ plr) {
@@ -263,7 +263,8 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest, bool i
 	edict_t@ dest = isTest ? @plr.edict() : null;
 	
 	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
-		te_firefield(plr.pev.origin, 16, pee_sprite, count, 8, 255, msgType, dest);
+		string model = isBlood ? bleed_sprite : pee_sprite;
+		te_firefield(plr.pev.origin, 16, model, count, 8, 255, msgType, dest);
 	} else {
 		Vector peedir = state.male ? dir*50 + (dir*150*speed) : Vector(0,0,0);
 		
@@ -271,7 +272,7 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest, bool i
 		int life = isTest ? 0 : 255;
 		int flags = isTest ? 0 : 4;		
 		
-		string model = isBlood ? "sprites/bleed.spr" : "sprites/pee.spr";
+		string model = isBlood ? bleed_sprite : pee_sprite;
 		te_breakmodel(pos, Vector(0,0,0), peedir + plr.pev.velocity, 1, model, count, life, flags, msgType, dest);
 	}
 	
