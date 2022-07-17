@@ -1,20 +1,103 @@
 dictionary g_player_states;
 
 CCVar@ cvar_pp_cooldown;
+CCVar@ cvar_bleed_cooldown;
 
 string pee_sprite = "sprites/pee.spr";
 string coom_sprite = "sprites/coom.spr";
+string bleed_sprite = "sprites/bleed.spr";
+string milk_sound = "twlz/kimochi.wav";
 
 array<string> coom_sounds = {"pp/coom.wav", "pp/coom2.wav", "pp/coom3.wav"};
 
+float BLEED_DELAY = 1;
+float BLEED_LIFE = 10; // max life before killing blood entity
+
 class PlayerState {
+	bool autoBleed = false;
 	bool autoPee = false;
 	bool male = true;
 	bool isTesting = false;
 	int bone = -1;
 	float offset = 0;
-	float lastPee = 0;
+	float lastPee = -999;
 	float nextPee = 0;
+	float lastBleed = -999;
+}
+
+class BloodChunk : ScriptBaseAnimating
+{
+	float thinkDelay = 0.1;
+	float spawnTime = 0;
+	
+	array<string> big_blood_decals = {"{blood4", "{blood5", "{blood6"};
+	
+	void Spawn()
+	{		
+		self.pev.movetype = MOVETYPE_TOSS;
+		self.pev.solid = SOLID_BBOX;
+		
+		g_EntityFuncs.SetModel( self, pev.model );
+		
+		g_EntityFuncs.SetSize(pev, Vector(0,0,0), Vector(0,0,0));
+		
+		pev.frame = 0;
+		pev.scale = 0.8f;
+		pev.rendercolor = Vector(64, 0, 0);
+		//self.ResetSequenceInfo();
+		
+		SetThink( ThinkFunction( MoveThink ) );
+		self.pev.nextthink = g_Engine.time + thinkDelay;
+		
+		spawnTime = g_Engine.time;
+	}
+	
+	void MoveThink()
+	{
+		float nextThink = g_Engine.time + thinkDelay;
+		
+		pev.frame += 1;
+		if (pev.frame > 8) {
+			pev.frame = 0;
+		}
+		
+		if (g_EngineFuncs.PointContents(pev.origin) == CONTENTS_WATER) {
+			Vector splatOri = pev.origin;
+			splatOri.z = g_Utility.WaterLevel(pev.origin, pev.origin.z, pev.origin.z + 256) - 16;
+			te_firefield(splatOri, 6, bleed_sprite, 16, 8, 50);
+			g_EntityFuncs.Remove(self);
+		}
+		
+		if (g_Engine.time - spawnTime > BLEED_LIFE) {
+			g_EntityFuncs.Remove(self);
+		}
+		
+		self.pev.nextthink = nextThink;
+	}
+	
+	void Touch( CBaseEntity@ pOther )
+	{
+		uint8 splatScale = 5;
+		
+		if (pOther.IsBSPModel()) {
+			float speed = pev.velocity.Length();
+			string decal = "{blood8";
+			
+			if (speed > 500) {
+				decal = big_blood_decals[Math.RandomLong(0, big_blood_decals.size()-1)];
+				splatScale = 10;
+			} else if (speed > 300) {
+				decal = "{blood7";
+				splatScale = 7;
+			}
+			
+			te_decal(pev.origin, pOther, decal);
+		}
+		
+		te_bloodsprite(pev.origin, "sprites/bloodspray.spr", "sprites/blood.spr", 70, splatScale);
+		
+		g_EntityFuncs.Remove(self);
+	}
 }
 
 void PluginInit()
@@ -25,19 +108,26 @@ void PluginInit()
 	g_Hooks.RegisterHook( Hooks::Player::ClientSay, @ClientSay );
 	
 	@cvar_pp_cooldown = CCVar("cooldown", 60, "pee cooldown", ConCommandFlag::AdminOnly);
+	@cvar_bleed_cooldown = CCVar("bloodcooldown", 1, "bleed cooldown", ConCommandFlag::AdminOnly);
 	
 	g_Scheduler.SetInterval("auto_pee", 1.0f, -1);
+	
+	g_CustomEntityFuncs.RegisterCustomEntity( "BloodChunk", "BloodChunk" );
 }
 
 void MapInit()
 {
 	g_Game.PrecacheModel(pee_sprite);
 	g_Game.PrecacheModel(coom_sprite);
+	g_Game.PrecacheModel(bleed_sprite);
 	
 	for (uint i = 0; i < coom_sounds.size(); i++) {
 		g_SoundSystem.PrecacheSound(coom_sounds[i]);
 		g_Game.PrecacheGeneric("sound/" + coom_sounds[i]);
 	}
+	
+	g_SoundSystem.PrecacheSound(milk_sound);
+	g_Game.PrecacheGeneric("sound/" + milk_sound);
 }
 
 void MapActivate() {	
@@ -46,22 +136,56 @@ void MapActivate() {
 	{
 		PlayerState@ state = cast<PlayerState@>( g_player_states[stateKeys[i]] );
 		state.lastPee = -999;
+		state.lastBleed = -999;
 	}
+}
+
+void bleed(CBasePlayer@ plr) {
+	PlayerState@ state = getPlayerState(plr);
+	state.lastBleed = g_Engine.time;
+	
+	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
+		te_firefield(plr.pev.origin, 6, bleed_sprite, 16, 8, 50);
+		return;
+	}
+	
+	float x = 3;
+	Vector bloodOri = plr.pev.origin + Vector(Math.RandomFloat(-x, x), Math.RandomFloat(-x, x), Math.RandomFloat(-x, x));
+	
+	float offset = state.offset;
+	if (plr.pev.flags & FL_DUCKING != 0) {
+		offset *= 0.5f;
+	}
+	
+	bloodOri.z += offset;
+	
+	dictionary keys;
+	keys["origin"] = bloodOri.ToString();
+	keys["velocity"] = plr.pev.velocity.ToString();
+	keys["model"] = "sprites/blood.spr";
+	CBaseEntity@ blood = g_EntityFuncs.CreateEntity("BloodChunk", keys, true);
+	blood.pev.velocity = plr.pev.velocity;
+	@blood.pev.owner = @plr.edict();
+	g_EntityFuncs.SetSize(blood.pev, Vector(0,0,0), Vector(0,0,0));
 }
 
 void auto_pee() {
 	for ( int i = 1; i <= g_Engine.maxClients; i++ )
 	{
-		CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex(i);
-		if (p is null or !p.IsConnected() or !p.IsAlive())
+		CBasePlayer@ plr = g_PlayerFuncs.FindPlayerByIndex(i);
+		if (plr is null or !plr.IsConnected() or !plr.IsAlive())
 			continue;
 		
 		
-		PlayerState@ state = getPlayerState(p);
+		PlayerState@ state = getPlayerState(plr);
 		if (state.autoPee && state.nextPee < g_Engine.time) {
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
-			peepee(EHandle(p), 1.0f, 4, false);
+			peepee(EHandle(plr), 1.0f, 4, false, false);
+		}
+		
+		if (state.autoBleed and g_Engine.time - state.lastBleed > cvar_bleed_cooldown.GetFloat()) {
+			bleed(plr);
 		}
 	}
 }
@@ -85,7 +209,7 @@ PlayerState@ getPlayerState(CBasePlayer@ plr)
 	return cast<PlayerState@>( g_player_states[steamId] );
 }
 
-void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
+void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest, bool isBlood) {
 	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
 	
 	if (plr is null or strength <= 0 or !plr.IsAlive()) {
@@ -147,7 +271,8 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 		int life = isTest ? 0 : 255;
 		int flags = isTest ? 0 : 4;		
 		
-		te_breakmodel(pos, Vector(0,0,0), peedir + plr.pev.velocity, 1, "sprites/pee.spr", count, life, flags, msgType, dest);
+		string model = isBlood ? "sprites/bleed.spr" : "sprites/pee.spr";
+		te_breakmodel(pos, Vector(0,0,0), peedir + plr.pev.velocity, 1, model, count, life, flags, msgType, dest);
 	}
 	
 	float delay = isTest ? 0.1f : 0.05f;
@@ -156,14 +281,14 @@ void peepee(EHandle h_plr, float strength, int squirts_left, bool isTest) {
 		squirts_left--;
 	}
 	
-	g_Scheduler.SetTimeout("peepee", delay, h_plr, strength - 0.01f, squirts_left, isTest);
+	g_Scheduler.SetTimeout("peepee", delay, h_plr, strength - 0.01f, squirts_left, isTest, isBlood);
 }
 
-void delay_decal(Vector pos, EHandle h_hitEnt) {
-	te_decal(pos, h_hitEnt, "{mommablob");
+void delay_decal(Vector pos, EHandle h_hitEnt, string decal) {
+	te_decal(pos, h_hitEnt, decal);
 }
 
-void coom(EHandle h_plr, float strength, int squirts_left) {
+void coom(EHandle h_plr, float strength, int squirts_left, bool isBlood) {
 	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
 	
 	if (plr is null or strength <= 0 or !plr.IsAlive()) {
@@ -201,13 +326,15 @@ void coom(EHandle h_plr, float strength, int squirts_left) {
 	int count = strength > 0.5f ? 2 : 1;
 	
 	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
-		te_firefield(plr.pev.origin, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
+		string spr = isBlood ? bleed_sprite : coom_sprite;
+		te_firefield(plr.pev.origin, 6, spr, 16, 8, 255, MSG_BROADCAST, null);
 	} else {
 		Vector peedir = state.male ? coomdir : Vector(0,0,0);
 		
 		int life = 255;
 		int flags = 4;
-		te_bloodstream(pos, coomdir, 5, int(speed*200));
+		int color = isBlood ? 70 : 5;
+		te_bloodstream(pos, coomdir, color, int(speed*200));
 		
 		if (strength == 1.0f) {
 			float coomDist = strength*256;
@@ -217,7 +344,8 @@ void coom(EHandle h_plr, float strength, int squirts_left) {
 			
 			if (tr.flFraction < 1.0f) {
 				float impactTime = (tr.vecEndPos - pos).Length() / coomDist;
-				g_Scheduler.SetTimeout("delay_decal", impactTime, tr.vecEndPos, EHandle(g_EntityFuncs.Instance(tr.pHit)));
+				string decal = isBlood ? "{bigblood1" : "{mommablob";
+				g_Scheduler.SetTimeout("delay_decal", impactTime, tr.vecEndPos, EHandle(g_EntityFuncs.Instance(tr.pHit)), decal);
 			}
 		}
 		
@@ -225,7 +353,7 @@ void coom(EHandle h_plr, float strength, int squirts_left) {
 	
 	float delay = 1.0f;
 	if (--squirts_left > 0) {
-		g_Scheduler.SetTimeout("coom", delay, h_plr, strength * 0.6f, squirts_left);
+		g_Scheduler.SetTimeout("coom", delay, h_plr, strength * 0.6f, squirts_left, isBlood);
 	}
 	
 }
@@ -344,7 +472,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 					state.isTesting = !state.isTesting;
 					if (state.isTesting) {
 						g_PlayerFuncs.SayText(plr, 'Test pee enabled\n');
-						peepee(EHandle(plr), 5.0f, 4, true);
+						peepee(EHandle(plr), 5.0f, 4, true, false);
 					}
 					
 					return true;
@@ -394,6 +522,10 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pee" to pee.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".coom" to coom.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".milk" to lactate.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".blood" to bleed once.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bleed" to bleed constantly.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bloodpee" to pee blood.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bloodcoom" to coom blood.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp auto" to toggle automatic peeing.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp [m/f]" to change pee mode.\n');
 			
@@ -430,7 +562,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			return true;
 		}
 		
-		if ( args[0] == ".pee" )
+		if ( args[0] == ".pee" or args[0] == ".bloodpee" )
 		{
 			float delta = g_Engine.time - state.lastPee;
 			if (delta < cvar_pp_cooldown.GetInt()) {
@@ -439,11 +571,28 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			}
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
-			peepee(EHandle(plr), 1.0f, 4, false);
+			peepee(EHandle(plr), 1.0f, 4, false, args[0] == ".bloodpee");
 			return true;
 		}
 		
-		if ( args[0] == ".coom" )
+		if (args[0] == ".blood") {
+			if (g_Engine.time - state.lastBleed < cvar_bleed_cooldown.GetFloat()) {
+				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCENTER, "Wait a second\n");
+				return true;
+			}
+			
+			bleed(plr);
+			return true;
+		}
+		
+		if (args[0] == ".bleed") {
+			state.autoBleed = !state.autoBleed;
+			state.lastBleed = g_Engine.time;
+			g_PlayerFuncs.SayText(plr, 'Constant bleed ' + (state.autoBleed ? "enabled" : "disabled") + '.\n');
+			return true;
+		}
+		
+		if ( args[0] == ".coom" or args[0] == ".bloodcoom" )
 		{
 			float delta = g_Engine.time - state.lastPee;
 			if (delta < cvar_pp_cooldown.GetInt()) {
@@ -453,7 +602,9 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
 			
-			coom(EHandle(plr), 1.0f, 3);
+			bool isBlood = args[0] == ".bloodcoom";
+			
+			coom(EHandle(plr), 1.0f, 3, isBlood);
 			
 			if (plr.IsAlive()) {
 				string snd = coom_sounds[Math.RandomLong(0, coom_sounds.size()-1)];
@@ -472,6 +623,11 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 				g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCENTER, "Wait " + int((cvar_pp_cooldown.GetInt() - delta) + 0.99f) + " seconds\n");
 				return true;
 			}
+			
+			int pit = Math.RandomLong(95, 105);
+			float vol = 0.8f;
+			g_SoundSystem.PlaySound(plr.edict(), CHAN_VOICE, milk_sound, vol, 0.8f, 0, pit, 0, true, plr.pev.origin);
+			
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
 			lactate(EHandle(plr), 1.0f, 2);
@@ -498,7 +654,12 @@ HookReturnCode ClientSay( SayParameters@ pParams )
 CClientCommand _pp("pp", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _pee("pee", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _coom("coom", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _milk("milk", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _lactate("lactate", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _bleed("bleed", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _blood("blood", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _bloodpee("bloodpee", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _bloodcoom("bloodcoom", "Pee pee poo poo commands", @consoleCmd );
 
 void consoleCmd( const CCommand@ args )
 {
