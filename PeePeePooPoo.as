@@ -16,6 +16,7 @@ float BLEED_LIFE = 10; // max life before killing blood entity
 
 class PlayerState {
 	bool autoBleed = false;
+	bool realBleed = false;
 	bool autoPee = false;
 	bool male = true;
 	bool isTesting = false;
@@ -191,8 +192,10 @@ void auto_pee() {
 			peepee(EHandle(plr), 1.0f, 4, false, false);
 		}
 		
-		if (state.autoBleed and g_Engine.time - state.lastBleed > cvar_bleed_cooldown.GetFloat()) {
-			bleed(plr);
+		if ((state.autoBleed or state.realBleed) and g_Engine.time - state.lastBleed > cvar_bleed_cooldown.GetFloat()) {
+			if (state.autoBleed or plr.pev.health < plr.pev.max_health) {
+				bleed(plr);
+			}
 		}
 	}
 }
@@ -535,8 +538,10 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".milk" to lactate.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".blood" to bleed once.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bleed" to bleed constantly.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bleedhp" to bleed only when health is not maxed.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bloodpee" to pee blood.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bloodcoom" to coom blood.\n');
+			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".bloodmilk" to lactate blood.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp auto" to toggle automatic peeing.\n');
 			g_PlayerFuncs.ClientPrint(plr, HUD_PRINTCONSOLE, 'Type ".pp [m/f]" to change pee mode.\n');
 			
@@ -598,8 +603,17 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 		
 		if (args[0] == ".bleed") {
 			state.autoBleed = !state.autoBleed;
+			state.realBleed = false;
 			state.lastBleed = g_Engine.time;
 			g_PlayerFuncs.SayText(plr, 'Constant bleed ' + (state.autoBleed ? "enabled" : "disabled") + '.\n');
+			return true;
+		}
+		
+		if (args[0] == ".bleedhp") {
+			state.realBleed = !state.realBleed;
+			state.autoBleed = false;
+			state.lastBleed = g_Engine.time;
+			g_PlayerFuncs.SayText(plr, 'Low HP bleeding ' + (state.realBleed ? "enabled" : "disabled") + '.\n');
 			return true;
 		}
 		
@@ -668,6 +682,7 @@ CClientCommand _coom("coom", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _milk("milk", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _lactate("lactate", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _bleed("bleed", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _bleedhp("bleedhp", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _blood("blood", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _bloodpee("bloodpee", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _bloodcoom("bloodcoom", "Pee pee poo poo commands", @consoleCmd );
