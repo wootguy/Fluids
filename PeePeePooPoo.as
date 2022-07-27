@@ -7,6 +7,7 @@ string pee_sprite = "sprites/pee.spr";
 string coom_sprite = "sprites/coom.spr";
 string bleed_sprite = "sprites/bleed.spr";
 string milk_sound = "twlz/kimochi.wav";
+string splat_sound = "pp/splat.wav";
 
 array<string> coom_sounds = {"pp/coom.wav", "pp/coom2.wav", "pp/coom3.wav"};
 
@@ -78,9 +79,9 @@ class BloodChunk : ScriptBaseAnimating
 	void Touch( CBaseEntity@ pOther )
 	{
 		uint8 splatScale = 5;
+		float speed = pev.velocity.Length();
 		
 		if (pOther.IsBSPModel()) {
-			float speed = pev.velocity.Length();
 			string decal = "{blood8";
 			
 			if (speed > 500) {
@@ -96,6 +97,9 @@ class BloodChunk : ScriptBaseAnimating
 		
 		te_bloodsprite(pev.origin, "sprites/bloodspray.spr", "sprites/blood.spr", 70, splatScale);
 		
+		float vol = Math.min(1.0f, 0.1f + (speed / 10000.0f));
+		int pit = Math.RandomLong(90, 110);
+		g_SoundSystem.PlaySound(self.edict(), CHAN_VOICE, splat_sound, vol, 1.0f, 0, pit, 0, true, pev.origin);
 		g_EntityFuncs.Remove(self);
 	}
 }
@@ -126,6 +130,9 @@ void MapInit()
 	
 	g_SoundSystem.PrecacheSound(milk_sound);
 	g_Game.PrecacheGeneric("sound/" + milk_sound);
+	
+	g_SoundSystem.PrecacheSound(splat_sound);
+	g_Game.PrecacheGeneric("sound/" + splat_sound);
 }
 
 void MapActivate() {	
@@ -359,7 +366,7 @@ void coom(EHandle h_plr, float strength, int squirts_left, bool isBlood) {
 	
 }
 
-void lactate(EHandle h_plr, float strength, int squirts_left) {
+void lactate(EHandle h_plr, float strength, int squirts_left, bool isBlood) {
 	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
 	
 	if (plr is null or strength <= 0 or !plr.IsAlive()) {
@@ -411,20 +418,23 @@ void lactate(EHandle h_plr, float strength, int squirts_left) {
 	Vector pos2 = pos - latDir*nipSpacing;
 	
 	if (plr.pev.waterlevel >= WATERLEVEL_WAIST) {
-		te_firefield(pos1, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
-		te_firefield(pos2, 6, coom_sprite, 16, 8, 255, MSG_BROADCAST, null);
+		string model = isBlood ? bleed_sprite : coom_sprite;
+		te_firefield(pos1, 6, model, 16, 8, 255, MSG_BROADCAST, null);
+		te_firefield(pos2, 6, model, 16, 8, 255, MSG_BROADCAST, null);
 	} else {
+		int color = isBlood ? 70 : 5;
+		int color2 = isBlood ? 70 : 10;
 		
-		te_bloodstream(pos1, dir1, 5, int(speed*200));
-		te_bloodstream(pos2, dir2, 5, int(speed*200));
+		te_bloodstream(pos1, dir1, color, int(speed*200));
+		te_bloodstream(pos2, dir2, color, int(speed*200));
 		
-		te_bloodsprite(pos1, "sprites/bloodspray.spr", "sprites/blood.spr", 10, 3);
-		te_bloodsprite(pos2, "sprites/bloodspray.spr", "sprites/blood.spr", 10, 3);
+		te_bloodsprite(pos1, "sprites/bloodspray.spr", "sprites/blood.spr", color2, 3);
+		te_bloodsprite(pos2, "sprites/bloodspray.spr", "sprites/blood.spr", color2, 3);
 	}
 	
 	float delay = 1.0f;
 	if (--squirts_left > 0) {
-		g_Scheduler.SetTimeout("lactate", delay, h_plr, strength * 0.6f, squirts_left);
+		g_Scheduler.SetTimeout("lactate", delay, h_plr, strength * 0.6f, squirts_left, isBlood);
 	}
 }
 
@@ -617,7 +627,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			return true;
 		}
 		
-		if ( args[0] == ".lactate" || args[0] == ".milk" )
+		if ( args[0] == ".lactate" || args[0] == ".milk" || args[0] == ".bloodmilk" )
 		{
 			float delta = g_Engine.time - state.lastPee;
 			if (delta < cvar_pp_cooldown.GetInt()) {
@@ -631,7 +641,7 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 			
 			state.nextPee = getNextAutoPee();
 			state.lastPee = g_Engine.time;
-			lactate(EHandle(plr), 1.0f, 2);
+			lactate(EHandle(plr), 1.0f, 2, args[0] == ".bloodmilk");
 			return true;
 		}
 	}
@@ -661,6 +671,7 @@ CClientCommand _bleed("bleed", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _blood("blood", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _bloodpee("bloodpee", "Pee pee poo poo commands", @consoleCmd );
 CClientCommand _bloodcoom("bloodcoom", "Pee pee poo poo commands", @consoleCmd );
+CClientCommand _bloodmilk("bloodmilk", "Pee pee poo poo commands", @consoleCmd );
 
 void consoleCmd( const CCommand@ args )
 {
