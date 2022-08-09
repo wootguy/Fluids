@@ -98,7 +98,7 @@ class BloodChunk : ScriptBaseAnimating
 		
 		te_bloodsprite(pev.origin, "sprites/bloodspray.spr", "sprites/blood.spr", 70, splatScale);
 		
-		float vol = Math.min(1.0f, 0.1f + (speed / 10000.0f));
+		float vol = Math.min(1.0f, 0.15f + (speed / 10000.0f));
 		int pit = Math.RandomLong(90, 110);
 		g_SoundSystem.PlaySound(self.edict(), CHAN_VOICE, splat_sound, vol, 1.0f, 0, pit, 0, true, pev.origin);
 		g_EntityFuncs.Remove(self);
@@ -602,7 +602,11 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 		}
 		
 		if (args[0] == ".bleed") {
-			state.autoBleed = !state.autoBleed;
+			if (args.ArgC() == 1) {
+				state.autoBleed = !state.autoBleed;
+			} else {
+				state.autoBleed = atoi(args[1]) != 0;
+			}
 			state.realBleed = false;
 			state.lastBleed = g_Engine.time;
 			g_PlayerFuncs.SayText(plr, 'Constant bleed ' + (state.autoBleed ? "enabled" : "disabled") + '.\n');
@@ -610,7 +614,11 @@ bool doCommand(CBasePlayer@ plr, const CCommand@ args, bool isConsoleCommand)
 		}
 		
 		if (args[0] == ".bleedhp") {
-			state.realBleed = !state.realBleed;
+			if (args.ArgC() == 1) {
+				state.realBleed = !state.realBleed;
+			} else {
+				state.realBleed = atoi(args[1]) != 0;
+			}
 			state.autoBleed = false;
 			state.lastBleed = g_Engine.time;
 			g_PlayerFuncs.SayText(plr, 'Low HP bleeding ' + (state.realBleed ? "enabled" : "disabled") + '.\n');
